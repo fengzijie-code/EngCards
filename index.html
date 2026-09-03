@@ -119,12 +119,18 @@
             gap: 8px;
         }
 
+        .btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .btn-primary {
             background-color: var(--accent-color);
             color: var(--bg-primary);
         }
 
-        .btn-primary:hover {
+        .btn-primary:hover:not(:disabled) {
             opacity: 0.9;
             transform: translateY(-1px);
         }
@@ -135,7 +141,7 @@
             border: 1px solid var(--border-color);
         }
 
-        .btn-secondary:hover {
+        .btn-secondary:hover:not(:disabled) {
             background-color: var(--border-color);
         }
 
@@ -614,8 +620,8 @@
             
             <div class="stats-container">
                 <div class="stat-card">
-                    <div class="stat-number" id="today-count">0</div>
-                    <div class="stat-label">今日已学</div>
+                    <div class="stat-number" id="today-count">0 / 20</div>
+                    <div class="stat-label">今日新词</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number" id="total-count">0</div>
@@ -628,8 +634,8 @@
             </div>
 
             <div class="btn-group">
-                <button class="btn btn-primary" onclick="app.gotoCard()">Target</button>
-                <button class="btn btn-primary" onclick="app.gotoList()">List</button>
+                <button class="btn btn-primary" onclick="app.gotoCard()">开始今日学习</button>
+                <button class="btn btn-primary" onclick="app.gotoList()">单词列表</button>
             </div>
 
             <button class="btn btn-secondary btn-block" onclick="app.showImportModal()">导入词库</button>
@@ -694,9 +700,9 @@
             </div>
 
             <div id="completion-message" class="completion-message" style="display: none;">
-                <h2>🎉 恭喜完成！</h2>
-                <p>本词库所有单词已学习完毕</p>
-                <button class="btn btn-primary btn-block" onclick="app.resetProgress()">重新开始</button>
+                <h2 id="completion-title">本轮完成</h2>
+                <p id="completion-text">本轮单词已学习完毕</p>
+                <button id="restart-progress-button" class="btn btn-primary btn-block" onclick="app.resetProgress()">重新开始词库</button>
                 <button class="btn btn-secondary btn-block" onclick="app.goBackFromCard()" style="margin-top: 12px;">返回</button>
             </div>
 
@@ -739,8 +745,26 @@
 
         <!-- 不认识单词页 -->
         <div id="unrecognized-page" class="page">
-            <h2 class="page-title" style="font-size: 20px;">不认识单词</h2>
-            
+            <h2 class="page-title" style="font-size: 20px;">不会的单词</h2>
+
+            <div class="stats-container">
+                <div class="stat-card">
+                    <div class="stat-number" id="review-layer1-count">0</div>
+                    <div class="stat-label">第一层</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="review-layer2-count">0</div>
+                    <div class="stat-label">第二层</div>
+                </div>
+            </div>
+
+            <p id="review-level-label" style="text-align: center; color: var(--text-secondary); margin-bottom: 12px;"></p>
+            <div class="btn-group">
+                <button class="btn btn-primary" id="review-layer1-button" onclick="app.startReview(1)">复习第一层</button>
+                <button class="btn btn-primary" id="review-layer2-button" onclick="app.startReview(2)">复习第二层</button>
+            </div>
+            <button class="btn btn-secondary btn-block" onclick="app.exportUnrecognizedTxt()">导出全部不会词 TXT</button>
+
             <div id="unrecognized-content">
                 <div style="overflow-x: auto;">
                     <table class="word-table">
@@ -748,6 +772,7 @@
                             <tr>
                                 <th>单词</th>
                                 <th>释义</th>
+                                <th>层级</th>
                                 <th>操作</th>
                             </tr>
                         </thead>
@@ -756,13 +781,13 @@
                     </table>
                 </div>
 
-                <button class="btn btn-danger btn-block" style="margin-top: 20px;" onclick="app.clearUnrecognized()">清空列表</button>
+                <button class="btn btn-danger btn-block" style="margin-top: 20px;" onclick="app.clearUnrecognized()">清空两层列表</button>
             </div>
 
             <div id="unrecognized-empty" class="empty-state" style="display: none;">
                 <div class="empty-icon">📚</div>
                 <p>还没有标记为不认识的单词</p>
-                <p style="font-size: 14px; margin-top: 8px;">在学习过程中标记不认识的单词会显示在这里</p>
+                <p style="font-size: 14px; margin-top: 8px;">今日学习中标记“不认识”的单词会永久加入第一层</p>
             </div>
         </div>
 
@@ -827,7 +852,7 @@
             <div class="modal-title">导入词库</div>
             <div class="modal-body">
                 <p style="margin-bottom: 12px; font-size: 14px; color: var(--text-secondary);">
-                    格式：每行一个单词，格式为：单词,音标,释义,例句<br>
+                    格式：每行一个单词，支持“单词,音标,释义,例句”或“单词[TAB]释义”<br>
                     或粘贴JSON格式单词数组
                 </p>
                 <textarea id="import-text" placeholder="例如：
@@ -938,6 +963,10 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 this.currentIndex = 0;
                 this.knownIndices = new Set();
                 this.unknownIndices = new Set();
+                this.dailyLimit = 20;
+                this.studyMode = 'daily';
+                this.reviewQueue = [];
+                this.reviewPosition = 0;
                 this.confirmCallback = null;
                 this.audioToken = 0;
                 this.audioTimer = null;
@@ -1043,9 +1072,21 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 if (unrecognizedChanged) {
                     this.saveUnrecognized(unrecognized);
                 }
-                // 初始化每日统计
-                if (!localStorage.getItem('dailyStats')) {
-                    localStorage.setItem('dailyStats', JSON.stringify({}));
+
+                const reviewLayer2 = this.getReviewLayer2();
+                let reviewLayer2Changed = false;
+                ['cet4', 'cet6', 'custom'].forEach(level => {
+                    if (!Array.isArray(reviewLayer2[level])) {
+                        reviewLayer2[level] = [];
+                        reviewLayer2Changed = true;
+                    }
+                });
+                if (reviewLayer2Changed) {
+                    this.saveReviewLayer2(reviewLayer2);
+                }
+
+                if (!localStorage.getItem('dailyNewStats')) {
+                    localStorage.setItem('dailyNewStats', JSON.stringify({}));
                 }
             }
 
@@ -1084,20 +1125,45 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 localStorage.setItem('unrecognized', JSON.stringify(unrecognized));
             }
 
-            // 获取每日统计
-            getDailyStats() {
-                const data = localStorage.getItem('dailyStats');
+            getReviewLayer2() {
+                const data = localStorage.getItem('reviewLayer2');
+                return data ? JSON.parse(data) : { cet4: [], cet6: [], custom: [] };
+            }
+
+            saveReviewLayer2(reviewLayer2) {
+                localStorage.setItem('reviewLayer2', JSON.stringify(reviewLayer2));
+            }
+
+            // 每日新词数量按日期和词库分别记录，复习不占用每日额度
+            getDailyNewStats() {
+                const data = localStorage.getItem('dailyNewStats');
                 return data ? JSON.parse(data) : {};
             }
 
-            // 保存每日统计
-            saveDailyStats(stats) {
-                localStorage.setItem('dailyStats', JSON.stringify(stats));
+            saveDailyNewStats(stats) {
+                localStorage.setItem('dailyNewStats', JSON.stringify(stats));
+            }
+
+            getTodayNewCount(level = this.currentLevel) {
+                const today = this.getDailyNewStats()[this.getTodayKey()] || {};
+                return today[level] || 0;
+            }
+
+            resetTodayNewCount(level = this.currentLevel) {
+                const stats = this.getDailyNewStats();
+                const todayKey = this.getTodayKey();
+                if (!stats[todayKey]) return;
+                stats[todayKey][level] = 0;
+                this.saveDailyNewStats(stats);
             }
 
             // 获取今日日期字符串
             getTodayKey() {
-                return new Date().toISOString().split('T')[0];
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
             }
 
             // 更新UI
@@ -1110,17 +1176,12 @@ ability,əˈbɪləti,n. 能力,She has the ability...
             // 更新首页统计
             updateHomeStats() {
                 const words = this.getWords(this.currentLevel);
-                const progress = this.getProgress();
                 const unrecognized = this.getUnrecognized();
-                const dailyStats = this.getDailyStats();
+                const todayCount = this.getTodayNewCount();
                 
-                const todayKey = this.getTodayKey();
-                const todayCount = dailyStats[todayKey] || 0;
-                
-                document.getElementById('today-count').textContent = todayCount;
+                document.getElementById('today-count').textContent = `${Math.min(todayCount, this.dailyLimit)} / ${this.dailyLimit}`;
                 document.getElementById('total-count').textContent = words.length;
-                document.getElementById('unrecognized-count').textContent = 
-                    (unrecognized.cet4?.length || 0) + (unrecognized.cet6?.length || 0) + (unrecognized.custom?.length || 0);
+                document.getElementById('unrecognized-count').textContent = unrecognized[this.currentLevel]?.length || 0;
             }
 
             // 更新级别按钮状态
@@ -1166,6 +1227,9 @@ ability,əˈbɪləti,n. 能力,She has the ability...
 
             gotoCard(fromPage = 'home') {
                 this.fromPage = fromPage; // 记录从哪个页面进入
+                this.studyMode = 'daily';
+                this.reviewQueue = [];
+                this.reviewPosition = 0;
                 this.showPage('card-page');
                 this.loadCard();
             }
@@ -1238,42 +1302,61 @@ ability,əˈbɪləti,n. 能力,She has the ability...
             // 加载单词卡片
             loadCard() {
                 const words = this.getWords(this.currentLevel);
-                const progress = this.getProgress();
-                const levelProgress = progress[this.currentLevel] || { currentIndex: 0, known: [], unknown: [] };
-                
-                this.currentIndex = levelProgress.currentIndex || 0;
-                this.knownIndices = new Set(levelProgress.known || []);
-                this.unknownIndices = new Set(levelProgress.unknown || []);
+                if (this.studyMode === 'daily') {
+                    const progress = this.getProgress();
+                    const levelProgress = progress[this.currentLevel] || { currentIndex: 0, known: [], unknown: [] };
 
-                if (words.length === 0) {
+                    this.currentIndex = levelProgress.currentIndex || 0;
+                    this.knownIndices = new Set(levelProgress.known || []);
+                    this.unknownIndices = new Set(levelProgress.unknown || []);
+                }
+
+                if (this.studyMode !== 'daily' && this.reviewQueue.length === 0) {
+                    this.showCompletion('暂无可复习单词', '请先在学习或第一层复习中标记不认识。');
+                } else if (words.length === 0) {
                     this.showEmptyLibrary();
-                } else if (this.currentIndex >= words.length) {
-                    this.showCompletion();
+                } else if (this.studyMode === 'daily' && this.getTodayNewCount() >= this.dailyLimit) {
+                    this.showCompletion('今日任务完成', `今天已学习 ${this.dailyLimit} 个新词，可以继续复习不会的单词。`);
+                } else if (this.studyMode === 'daily' && this.currentIndex >= words.length) {
+                    this.showCompletion('词库学习完成', '本词库所有新词已学习完毕。', true);
+                } else if (this.studyMode !== 'daily' && this.reviewPosition >= this.reviewQueue.length) {
+                    const layerName = this.studyMode === 'review1' ? '第一层' : '第二层';
+                    this.showCompletion(`${layerName}复习完成`, `本轮共复习 ${this.reviewQueue.length} 个单词。`);
                 } else {
                     this.showWordCard();
                     this.updateCardProgress();
                 }
             }
 
+            getActiveWord() {
+                if (this.studyMode === 'daily') {
+                    return this.getWords(this.currentLevel)[this.currentIndex];
+                }
+                return this.reviewQueue[this.reviewPosition];
+            }
+
             showWordCard() {
-                const words = this.getWords(this.currentLevel);
-                const word = words[this.currentIndex];
+                const word = this.getActiveWord();
+                if (!word) return;
                 
                 document.getElementById('word-card-content').style.display = 'block';
                 document.getElementById('completion-message').style.display = 'none';
                 document.getElementById('empty-library-message').style.display = 'none';
                 
                 document.getElementById('word-text').textContent = word.word;
-                document.getElementById('phonetic-uk').textContent = '/' + word.phonetic_uk + '/';
-                document.getElementById('phonetic-us').textContent = '/' + word.phonetic_us + '/';
+                document.getElementById('phonetic-uk').textContent = word.phonetic_uk ? '/' + word.phonetic_uk + '/' : '点击发音';
+                document.getElementById('phonetic-us').textContent = word.phonetic_us ? '/' + word.phonetic_us + '/' : '点击发音';
                 document.getElementById('meaning').textContent = word.meaning;
-                document.getElementById('example').textContent = word.example;
+                document.getElementById('example').textContent = word.example || '暂无例句';
             }
 
-            showCompletion() {
+            showCompletion(title = '本轮完成', text = '本轮单词已学习完毕。', canRestart = false) {
                 document.getElementById('word-card-content').style.display = 'none';
                 document.getElementById('completion-message').style.display = 'block';
                 document.getElementById('empty-library-message').style.display = 'none';
+                document.getElementById('completion-title').textContent = title;
+                document.getElementById('completion-text').textContent = text;
+                document.getElementById('restart-progress-button').style.display = canRestart ? 'block' : 'none';
             }
 
             showEmptyLibrary() {
@@ -1283,30 +1366,60 @@ ability,əˈbɪləti,n. 能力,She has the ability...
             }
 
             updateCardProgress() {
-                const words = this.getWords(this.currentLevel);
-                const total = words.length;
-                const current = Math.min(this.currentIndex + 1, total);
-                
-                document.getElementById('card-progress').textContent = `${current} / ${total}`;
-                document.getElementById('card-progress-bar').style.width = `${(current / total) * 100}%`;
+                let current;
+                let total;
+                let label;
+
+                if (this.studyMode === 'daily') {
+                    total = this.dailyLimit;
+                    current = Math.min(this.getTodayNewCount() + 1, total);
+                    label = '今日新词';
+                } else {
+                    total = this.reviewQueue.length;
+                    current = Math.min(this.reviewPosition + 1, total);
+                    label = this.studyMode === 'review1' ? '第一层复习' : '第二层复习';
+                }
+
+                document.getElementById('card-progress').textContent = `${label} ${current} / ${total}`;
+                document.getElementById('card-progress-bar').style.width = total ? `${(current / total) * 100}%` : '0%';
             }
 
             // 标记认识
             markKnown() {
+                if (this.studyMode !== 'daily') {
+                    if (this.studyMode === 'review2') {
+                        this.removeFromReviewLayer2(this.getActiveWord());
+                    }
+                    this.reviewPosition++;
+                    this.loadCard();
+                    return;
+                }
+
+                const wasAlreadyStudied = this.knownIndices.has(this.currentIndex) || this.unknownIndices.has(this.currentIndex);
                 this.knownIndices.add(this.currentIndex);
                 this.currentIndex++;
                 this.saveCardProgress();
-                this.recordDailyStudy();
+                if (!wasAlreadyStudied) this.recordDailyNewStudy();
                 this.loadCard();
             }
 
             // 标记不认识
             markUnknown() {
+                if (this.studyMode !== 'daily') {
+                    if (this.studyMode === 'review1' || this.studyMode === 'review2') {
+                        this.addToReviewLayer2(this.getActiveWord());
+                    }
+                    this.reviewPosition++;
+                    this.loadCard();
+                    return;
+                }
+
+                const wasAlreadyStudied = this.knownIndices.has(this.currentIndex) || this.unknownIndices.has(this.currentIndex);
                 this.unknownIndices.add(this.currentIndex);
                 this.addToUnrecognized(this.currentIndex);
                 this.currentIndex++;
                 this.saveCardProgress();
-                this.recordDailyStudy();
+                if (!wasAlreadyStudied) this.recordDailyNewStudy();
                 this.loadCard();
             }
 
@@ -1339,12 +1452,34 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 }
             }
 
-            // 记录每日学习
-            recordDailyStudy() {
-                const dailyStats = this.getDailyStats();
+            addToReviewLayer2(word) {
+                if (!word) return;
+                const reviewLayer2 = this.getReviewLayer2();
+                const list = reviewLayer2[this.currentLevel] || [];
+                if (!list.some(item => item.word === word.word)) {
+                    list.push(word);
+                    reviewLayer2[this.currentLevel] = list;
+                    this.saveReviewLayer2(reviewLayer2);
+                }
+            }
+
+            removeFromReviewLayer2(word) {
+                if (!word) return;
+                const reviewLayer2 = this.getReviewLayer2();
+                reviewLayer2[this.currentLevel] = (reviewLayer2[this.currentLevel] || [])
+                    .filter(item => item.word !== word.word);
+                this.saveReviewLayer2(reviewLayer2);
+            }
+
+            // 仅新词学习计入每日 20 个额度
+            recordDailyNewStudy() {
+                const dailyStats = this.getDailyNewStats();
                 const todayKey = this.getTodayKey();
-                dailyStats[todayKey] = (dailyStats[todayKey] || 0) + 1;
-                this.saveDailyStats(dailyStats);
+                const today = dailyStats[todayKey] || {};
+                today[this.currentLevel] = (today[this.currentLevel] || 0) + 1;
+                dailyStats[todayKey] = today;
+                this.saveDailyNewStats(dailyStats);
+                this.updateHomeStats();
             }
 
             // 重置进度
@@ -1356,15 +1491,14 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                     unknown: []
                 };
                 this.saveProgress(progress);
+                this.resetTodayNewCount();
                 this.loadCard();
             }
 
             // 朗读单词
             speak(type) {
-                const words = this.getWords(this.currentLevel);
-                if (this.currentIndex >= words.length) return;
-
-                const word = words[this.currentIndex];
+                const word = this.getActiveWord();
+                if (!word) return;
                 const text = word.word;
 
                 // 新一轮播放：让上一轮所有异步回调作废，并停掉上一轮在线音频
@@ -1385,6 +1519,13 @@ ability,əˈbɪləti,n. 能力,She has the ability...
 
                     const utterance = new SpeechSynthesisUtterance(text);
                     utterance.lang = type === 'uk' ? 'en-GB' : 'en-US';
+                    const targetLanguage = utterance.lang.toLowerCase();
+                    const voices = window.speechSynthesis.getVoices();
+                    const voice = voices.find(item => item.lang.toLowerCase() === targetLanguage)
+                        || voices.find(item => item.lang.toLowerCase().startsWith(targetLanguage.slice(0, 2)));
+                    if (voice) {
+                        utterance.voice = voice;
+                    }
                     utterance.rate = 0.8;
                     utterance.volume = 1;
                     utterance.pitch = 1;
@@ -1410,6 +1551,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                     };
 
                     setTimeout(() => {
+                        window.speechSynthesis.resume();
                         window.speechSynthesis.speak(utterance);
                     }, 50);
 
@@ -1629,16 +1771,21 @@ ability,əˈbɪləti,n. 能力,She has the ability...
             // 加载不认识单词列表
             loadUnrecognizedList() {
                 const unrecognized = this.getUnrecognized();
-                const allUnrecognized = [
-                    ...(unrecognized.cet4 || []).map(w => ({ ...w, level: 'cet4' })),
-                    ...(unrecognized.cet6 || []).map(w => ({ ...w, level: 'cet6' })),
-                    ...(unrecognized.custom || []).map(w => ({ ...w, level: 'custom' }))
-                ];
+                const reviewLayer2 = this.getReviewLayer2();
+                const layer1Words = unrecognized[this.currentLevel] || [];
+                const layer2Words = reviewLayer2[this.currentLevel] || [];
+                const layer2Set = new Set(layer2Words.map(word => word.word));
+                const levelNames = { cet4: '四级', cet6: '六级', custom: '自定义' };
                 
                 const content = document.getElementById('unrecognized-content');
                 const empty = document.getElementById('unrecognized-empty');
+                document.getElementById('review-layer1-count').textContent = layer1Words.length;
+                document.getElementById('review-layer2-count').textContent = layer2Words.length;
+                document.getElementById('review-level-label').textContent = `当前词库：${levelNames[this.currentLevel] || ''}`;
+                document.getElementById('review-layer1-button').disabled = layer1Words.length === 0;
+                document.getElementById('review-layer2-button').disabled = layer2Words.length === 0;
                 
-                if (allUnrecognized.length === 0) {
+                if (layer1Words.length === 0) {
                     content.style.display = 'none';
                     empty.style.display = 'block';
                 } else {
@@ -1648,12 +1795,13 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                     const tbody = document.getElementById('unrecognized-table-body');
                     tbody.innerHTML = '';
                     
-                    allUnrecognized.forEach((word, index) => {
+                    layer1Words.forEach((word, index) => {
                         const row = document.createElement('tr');
                         row.innerHTML = `
                             <td class="word-cell">${word.word}</td>
                             <td>${word.meaning}</td>
-                            <td><button class="learn-btn" onclick="app.learnUnrecognizedWord(${index}, '${word.level}')">学习</button></td>
+                            <td>${layer2Set.has(word.word) ? '第一层、第二层' : '第一层'}</td>
+                            <td><button class="learn-btn" onclick="app.learnUnrecognizedWord(${index}, '${this.currentLevel}')">学习</button></td>
                         `;
                         tbody.appendChild(row);
                     });
@@ -1668,21 +1816,65 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 const word = wordList[index];
                 
                 if (word) {
-                    const words = this.getWords(level);
-                    const wordIndex = words.findIndex(w => w.word === word.word);
-                    if (wordIndex !== -1) {
-                        const progress = this.getProgress();
-                        progress[level].currentIndex = wordIndex;
-                        this.saveProgress(progress);
-                        this.saveSettings();
-                        this.gotoCard('unrecognized'); // 标记从不认识页面进入
-                    }
+                    this.studyMode = 'review1';
+                    this.reviewQueue = [word];
+                    this.reviewPosition = 0;
+                    this.fromPage = 'unrecognized';
+                    this.saveSettings();
+                    this.showPage('card-page');
+                    this.loadCard();
                 }
+            }
+
+            startReview(layer) {
+                const source = layer === 1 ? this.getUnrecognized() : this.getReviewLayer2();
+                const words = source[this.currentLevel] || [];
+                if (words.length === 0) {
+                    this.showToast(`第${layer === 1 ? '一' : '二'}层暂无单词`);
+                    return;
+                }
+
+                this.studyMode = layer === 1 ? 'review1' : 'review2';
+                this.reviewQueue = words.map(word => ({ ...word }));
+                this.reviewPosition = 0;
+                this.fromPage = 'unrecognized';
+                this.showPage('card-page');
+                this.loadCard();
+            }
+
+            exportUnrecognizedTxt() {
+                const unrecognized = this.getUnrecognized();
+                const levelNames = { cet4: '四级', cet6: '六级', custom: '自定义' };
+                const lines = [];
+
+                ['cet4', 'cet6', 'custom'].forEach(level => {
+                    const words = unrecognized[level] || [];
+                    if (words.length === 0) return;
+                    lines.push(`[${levelNames[level]}]`);
+                    words.forEach(word => lines.push(`${word.word}\t${word.meaning || ''}`));
+                    lines.push('');
+                });
+
+                if (lines.length === 0) {
+                    this.showToast('暂无不会的单词可导出');
+                    return;
+                }
+
+                const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `不会的单词-${this.getTodayKey()}.txt`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
             }
 
             // 清空不认识单词
             clearUnrecognized() {
                 this.saveUnrecognized({ cet4: [], cet6: [], custom: [] });
+                this.saveReviewLayer2({ cet4: [], cet6: [], custom: [] });
                 this.loadUnrecognizedList();
                 this.updateHomeStats();
             }
@@ -1737,8 +1929,8 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                         throw new Error('JSON必须是数组格式');
                     }
                 } catch (e) {
-                    // 尝试解析CSV格式
-                    words = this.parseCSV(text);
+                    // 尝试解析逗号或制表符分隔的文本格式
+                    words = this.parseDelimitedText(text);
                 }
 
                 if (words.length === 0) {
@@ -1776,6 +1968,11 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                     const unrecognized = this.getUnrecognized();
                     unrecognized[level] = [];
                     this.saveUnrecognized(unrecognized);
+
+                    const reviewLayer2 = this.getReviewLayer2();
+                    reviewLayer2[level] = [];
+                    this.saveReviewLayer2(reviewLayer2);
+                    this.resetTodayNewCount(level);
                 }
 
                 this.closeImportModal();
@@ -1783,23 +1980,43 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 alert(`成功${isReplace ? '替换' : '导入'} ${wordMap.size} 个单词`);
             }
 
-            // 解析CSV格式
-            parseCSV(text) {
+            // 解析CSV（单词,音标,释义,例句）或TSV（单词[TAB]释义）格式
+            parseDelimitedText(text) {
                 const words = [];
-                const lines = text.split('\n');
+                const lines = text.split(/\r?\n/);
                 
                 lines.forEach(line => {
                     line = line.trim();
                     if (!line) return;
-                    
-                    const parts = line.split(',');
-                    if (parts.length >= 2) {
+
+                    if (line.includes('\t')) {
+                        const parts = line.split('\t');
+                        const word = parts.shift().replace(/^\uFEFF/, '').trim();
+                        const meaning = parts.join('\t').trim();
+                        if (word && meaning) {
+                            words.push({
+                                word,
+                                phonetic_uk: '',
+                                phonetic_us: '',
+                                meaning,
+                                example: ''
+                            });
+                        }
+                    } else {
+                        const parts = line.split(',');
+                        if (parts.length < 2) return;
+
+                        const word = parts.shift().replace(/^\uFEFF/, '').trim();
+                        const phonetic = (parts.shift() || '').trim();
+                        const meaning = (parts.shift() || '').trim();
+                        if (!word) return;
+
                         words.push({
-                            word: parts[0].trim(),
-                            phonetic_uk: parts[1] ? parts[1].trim() : '',
-                            phonetic_us: parts[1] ? parts[1].trim() : '',
-                            meaning: parts[2] ? parts[2].trim() : '',
-                            example: parts[3] ? parts[3].trim() : ''
+                            word,
+                            phonetic_uk: phonetic,
+                            phonetic_us: phonetic,
+                            meaning,
+                            example: parts.join(',').trim()
                         });
                     }
                 });
@@ -1857,6 +2074,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                         const progress = this.getProgress();
                         progress[this.currentLevel] = { currentIndex: 0, known: [], unknown: [] };
                         this.saveProgress(progress);
+                        this.resetTodayNewCount();
                         this.updateHomeStats();
                         alert('学习进度已重置');
                     }
@@ -1917,6 +2135,10 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 const unrecognized = this.getUnrecognized();
                 unrecognized[level] = [];
                 this.saveUnrecognized(unrecognized);
+                const reviewLayer2 = this.getReviewLayer2();
+                reviewLayer2[level] = [];
+                this.saveReviewLayer2(reviewLayer2);
+                this.resetTodayNewCount(level);
                 this.updateHomeStats();
                 this.loadUnrecognizedList();
             }
@@ -1983,6 +2205,17 @@ ability,əˈbɪləti,n. 能力,She has the ability...
             
             // 返回上一词
             goToPrevWord() {
+                if (this.studyMode !== 'daily') {
+                    if (this.reviewPosition > 0) {
+                        this.reviewPosition--;
+                        this.showWordCard();
+                        this.updateCardProgress();
+                    } else {
+                        this.showToast('已经是本轮第一个单词了');
+                    }
+                    return;
+                }
+
                 const words = this.getWords(this.currentLevel);
                 if (this.currentIndex > 0) {
                     this.currentIndex--;
