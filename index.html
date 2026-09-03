@@ -759,9 +759,29 @@
             </div>
 
             <p id="review-level-label" style="text-align: center; color: var(--text-secondary); margin-bottom: 12px;"></p>
-            <div class="btn-group">
-                <button class="btn btn-primary" id="review-layer1-button" onclick="app.startReview(1)">复习第一层</button>
-                <button class="btn btn-primary" id="review-layer2-button" onclick="app.startReview(2)">复习第二层</button>
+            <div class="card">
+                <div class="setting-item" style="padding-top: 0;">
+                    <div>
+                        <div class="setting-label">第一层复习</div>
+                        <div id="review-layer1-progress" style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">尚未开始</div>
+                    </div>
+                </div>
+                <div class="btn-group" style="margin-bottom: 0;">
+                    <button class="btn btn-primary" id="review-layer1-continue" onclick="app.startReview(1, false)">继续复习</button>
+                    <button class="btn btn-secondary" id="review-layer1-restart" onclick="app.startReview(1, true)">从头开始</button>
+                </div>
+            </div>
+            <div class="card">
+                <div class="setting-item" style="padding-top: 0;">
+                    <div>
+                        <div class="setting-label">第二层复习</div>
+                        <div id="review-layer2-progress" style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">尚未开始</div>
+                    </div>
+                </div>
+                <div class="btn-group" style="margin-bottom: 0;">
+                    <button class="btn btn-primary" id="review-layer2-continue" onclick="app.startReview(2, false)">继续复习</button>
+                    <button class="btn btn-secondary" id="review-layer2-restart" onclick="app.startReview(2, true)">从头开始</button>
+                </div>
             </div>
             <button class="btn btn-secondary btn-block" onclick="app.exportUnrecognizedTxt()">导出全部不会词 TXT</button>
 
@@ -967,6 +987,8 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 this.studyMode = 'daily';
                 this.reviewQueue = [];
                 this.reviewPosition = 0;
+                this.reviewLayer = 0;
+                this.trackReviewProgress = false;
                 this.confirmCallback = null;
                 this.audioToken = 0;
                 this.audioTimer = null;
@@ -1085,6 +1107,18 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                     this.saveReviewLayer2(reviewLayer2);
                 }
 
+                const reviewProgress = this.getReviewProgress();
+                let reviewProgressChanged = false;
+                ['cet4', 'cet6', 'custom'].forEach(level => {
+                    if (!reviewProgress[level]) {
+                        reviewProgress[level] = this.createEmptyReviewProgress();
+                        reviewProgressChanged = true;
+                    }
+                });
+                if (reviewProgressChanged) {
+                    this.saveReviewProgress(reviewProgress);
+                }
+
                 if (!localStorage.getItem('dailyNewStats')) {
                     localStorage.setItem('dailyNewStats', JSON.stringify({}));
                 }
@@ -1132,6 +1166,46 @@ ability,əˈbɪləti,n. 能力,She has the ability...
 
             saveReviewLayer2(reviewLayer2) {
                 localStorage.setItem('reviewLayer2', JSON.stringify(reviewLayer2));
+            }
+
+            createEmptyReviewProgress() {
+                return {
+                    layer1: { order: [], position: 0 },
+                    layer2: { order: [], position: 0 }
+                };
+            }
+
+            getReviewProgress() {
+                const data = localStorage.getItem('reviewProgress');
+                return data ? JSON.parse(data) : {
+                    cet4: this.createEmptyReviewProgress(),
+                    cet6: this.createEmptyReviewProgress(),
+                    custom: this.createEmptyReviewProgress()
+                };
+            }
+
+            saveReviewProgress(progress) {
+                localStorage.setItem('reviewProgress', JSON.stringify(progress));
+            }
+
+            getLayerProgress(level, layer) {
+                const progress = this.getReviewProgress();
+                if (!progress[level]) progress[level] = this.createEmptyReviewProgress();
+                const key = `layer${layer}`;
+                if (!progress[level][key]) progress[level][key] = { order: [], position: 0 };
+                return { progress, entry: progress[level][key], key };
+            }
+
+            resetReviewProgress(level) {
+                const progress = this.getReviewProgress();
+                if (level) {
+                    progress[level] = this.createEmptyReviewProgress();
+                } else {
+                    ['cet4', 'cet6', 'custom'].forEach(item => {
+                        progress[item] = this.createEmptyReviewProgress();
+                    });
+                }
+                this.saveReviewProgress(progress);
             }
 
             // 每日新词数量按日期和词库分别记录，复习不占用每日额度
@@ -1230,6 +1304,8 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 this.studyMode = 'daily';
                 this.reviewQueue = [];
                 this.reviewPosition = 0;
+                this.reviewLayer = 0;
+                this.trackReviewProgress = false;
                 this.showPage('card-page');
                 this.loadCard();
             }
@@ -1391,6 +1467,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                         this.removeFromReviewLayer2(this.getActiveWord());
                     }
                     this.reviewPosition++;
+                    this.saveCurrentReviewProgress();
                     this.loadCard();
                     return;
                 }
@@ -1410,6 +1487,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                         this.addToReviewLayer2(this.getActiveWord());
                     }
                     this.reviewPosition++;
+                    this.saveCurrentReviewProgress();
                     this.loadCard();
                     return;
                 }
@@ -1469,6 +1547,61 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 reviewLayer2[this.currentLevel] = (reviewLayer2[this.currentLevel] || [])
                     .filter(item => item.word !== word.word);
                 this.saveReviewLayer2(reviewLayer2);
+            }
+
+            getReviewSource(layer, level = this.currentLevel) {
+                const source = layer === 1 ? this.getUnrecognized() : this.getReviewLayer2();
+                return source[level] || [];
+            }
+
+            reconcileReviewProgress(layer, restart = false, level = this.currentLevel) {
+                const words = this.getReviewSource(layer, level);
+                const wordMap = new Map(words.map(word => [word.word, word]));
+                const sourceOrder = words.map(word => word.word);
+                const { progress, entry, key } = this.getLayerProgress(level, layer);
+                let order;
+                let position;
+
+                if (restart) {
+                    order = sourceOrder;
+                    position = 0;
+                } else {
+                    const savedOrder = Array.isArray(entry.order) ? entry.order : [];
+                    const savedPosition = Math.max(0, Math.min(Number(entry.position) || 0, savedOrder.length));
+                    const answeredWords = new Set(savedOrder.slice(0, savedPosition));
+                    order = savedOrder.filter(word => wordMap.has(word));
+                    const knownOrder = new Set(order);
+                    sourceOrder.forEach(word => {
+                        if (!knownOrder.has(word)) order.push(word);
+                    });
+                    position = order.filter(word => answeredWords.has(word)).length;
+                }
+
+                progress[level][key] = { order, position };
+                this.saveReviewProgress(progress);
+                return {
+                    queue: order.map(word => wordMap.get(word)).filter(Boolean),
+                    position
+                };
+            }
+
+            saveCurrentReviewProgress() {
+                if (!this.trackReviewProgress || !this.reviewLayer) return;
+                const { progress, key } = this.getLayerProgress(this.currentLevel, this.reviewLayer);
+                progress[this.currentLevel][key] = {
+                    order: this.reviewQueue.map(word => word.word),
+                    position: Math.max(0, Math.min(this.reviewPosition, this.reviewQueue.length))
+                };
+                this.saveReviewProgress(progress);
+            }
+
+            getReviewProgressLabel(layer, total) {
+                if (total === 0) return '暂无单词';
+                const state = this.reconcileReviewProgress(layer, false);
+                if (state.position >= state.queue.length) {
+                    return `已完成 ${state.queue.length} / ${state.queue.length}`;
+                }
+                return `继续位置：第 ${state.position + 1} 个，共 ${state.queue.length} 个`;
             }
 
             // 仅新词学习计入每日 20 个额度
@@ -1782,8 +1915,12 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 document.getElementById('review-layer1-count').textContent = layer1Words.length;
                 document.getElementById('review-layer2-count').textContent = layer2Words.length;
                 document.getElementById('review-level-label').textContent = `当前词库：${levelNames[this.currentLevel] || ''}`;
-                document.getElementById('review-layer1-button').disabled = layer1Words.length === 0;
-                document.getElementById('review-layer2-button').disabled = layer2Words.length === 0;
+                document.getElementById('review-layer1-progress').textContent = this.getReviewProgressLabel(1, layer1Words.length);
+                document.getElementById('review-layer2-progress').textContent = this.getReviewProgressLabel(2, layer2Words.length);
+                document.getElementById('review-layer1-continue').disabled = layer1Words.length === 0;
+                document.getElementById('review-layer1-restart').disabled = layer1Words.length === 0;
+                document.getElementById('review-layer2-continue').disabled = layer2Words.length === 0;
+                document.getElementById('review-layer2-restart').disabled = layer2Words.length === 0;
                 
                 if (layer1Words.length === 0) {
                     content.style.display = 'none';
@@ -1819,6 +1956,8 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                     this.studyMode = 'review1';
                     this.reviewQueue = [word];
                     this.reviewPosition = 0;
+                    this.reviewLayer = 1;
+                    this.trackReviewProgress = false;
                     this.fromPage = 'unrecognized';
                     this.saveSettings();
                     this.showPage('card-page');
@@ -1826,17 +1965,19 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 }
             }
 
-            startReview(layer) {
-                const source = layer === 1 ? this.getUnrecognized() : this.getReviewLayer2();
-                const words = source[this.currentLevel] || [];
+            startReview(layer, restart = false) {
+                const words = this.getReviewSource(layer);
                 if (words.length === 0) {
                     this.showToast(`第${layer === 1 ? '一' : '二'}层暂无单词`);
                     return;
                 }
 
+                const state = this.reconcileReviewProgress(layer, restart);
                 this.studyMode = layer === 1 ? 'review1' : 'review2';
-                this.reviewQueue = words.map(word => ({ ...word }));
-                this.reviewPosition = 0;
+                this.reviewLayer = layer;
+                this.reviewQueue = state.queue.map(word => ({ ...word }));
+                this.reviewPosition = state.position;
+                this.trackReviewProgress = true;
                 this.fromPage = 'unrecognized';
                 this.showPage('card-page');
                 this.loadCard();
@@ -1875,6 +2016,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
             clearUnrecognized() {
                 this.saveUnrecognized({ cet4: [], cet6: [], custom: [] });
                 this.saveReviewLayer2({ cet4: [], cet6: [], custom: [] });
+                this.resetReviewProgress();
                 this.loadUnrecognizedList();
                 this.updateHomeStats();
             }
@@ -1972,6 +2114,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                     const reviewLayer2 = this.getReviewLayer2();
                     reviewLayer2[level] = [];
                     this.saveReviewLayer2(reviewLayer2);
+                    this.resetReviewProgress(level);
                     this.resetTodayNewCount(level);
                 }
 
@@ -2138,6 +2281,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 const reviewLayer2 = this.getReviewLayer2();
                 reviewLayer2[level] = [];
                 this.saveReviewLayer2(reviewLayer2);
+                this.resetReviewProgress(level);
                 this.resetTodayNewCount(level);
                 this.updateHomeStats();
                 this.loadUnrecognizedList();
@@ -2208,6 +2352,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 if (this.studyMode !== 'daily') {
                     if (this.reviewPosition > 0) {
                         this.reviewPosition--;
+                        this.saveCurrentReviewProgress();
                         this.showWordCard();
                         this.updateCardProgress();
                     } else {
