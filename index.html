@@ -547,6 +547,90 @@
             flex: 1;
         }
 
+        /* 学习热力图 */
+        #study-calendar-modal .modal-content {
+            max-width: 720px;
+        }
+
+        .study-summary {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .heatmap-scroll {
+            overflow-x: auto;
+            padding-bottom: 8px;
+        }
+
+        .heatmap-layout {
+            display: grid;
+            grid-template-columns: 24px max-content;
+            gap: 8px;
+            min-width: 640px;
+        }
+
+        .heatmap-weekdays {
+            display: grid;
+            grid-template-rows: 18px repeat(7, 11px);
+            gap: 4px;
+            color: var(--text-secondary);
+            font-size: 10px;
+            line-height: 11px;
+        }
+
+        .heatmap-months,
+        .heatmap-grid {
+            display: grid;
+            grid-template-columns: repeat(53, 11px);
+            gap: 4px;
+        }
+
+        .heatmap-months {
+            height: 18px;
+            color: var(--text-secondary);
+            font-size: 10px;
+            line-height: 12px;
+        }
+
+        .heatmap-month {
+            white-space: nowrap;
+        }
+
+        .heatmap-grid {
+            grid-template-rows: repeat(7, 11px);
+            grid-auto-flow: column;
+        }
+
+        .heatmap-day {
+            width: 11px;
+            height: 11px;
+            border-radius: 2px;
+            background: var(--border-color);
+        }
+
+        .heatmap-day.level-1 { background: #9be9a8; }
+        .heatmap-day.level-2 { background: #40c463; }
+        .heatmap-day.level-3 { background: #30a14e; }
+        .heatmap-day.level-4 { background: #216e39; }
+        .heatmap-day.is-future { opacity: 0.35; }
+
+        [data-theme="dark"] .heatmap-day { background: #30363d; }
+        [data-theme="dark"] .heatmap-day.level-1 { background: #0e4429; }
+        [data-theme="dark"] .heatmap-day.level-2 { background: #006d32; }
+        [data-theme="dark"] .heatmap-day.level-3 { background: #26a641; }
+        [data-theme="dark"] .heatmap-day.level-4 { background: #39d353; }
+
+        .heatmap-legend {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 5px;
+            margin-top: 16px;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
         /* 文本域 */
         textarea {
             width: 100%;
@@ -835,6 +919,10 @@
                     <span class="setting-label">清空词库</span>
                     <button class="btn btn-secondary" style="padding: 8px 16px; font-size: 14px;" onclick="app.showClearLibraryModal()">清空</button>
                 </div>
+                <div class="setting-item" style="border-bottom: 1px solid var(--border-color);">
+                    <span class="setting-label">学习记录</span>
+                    <button class="btn btn-secondary" style="padding: 8px 16px; font-size: 14px;" onclick="app.showStudyCalendar()">查看</button>
+                </div>
                 <div class="setting-item">
                     <span class="setting-label">导出词库</span>
                     <button class="btn btn-secondary" style="padding: 8px 16px; font-size: 14px;" onclick="app.exportWords()">导出</button>
@@ -930,6 +1018,34 @@ ability,əˈbɪləti,n. 能力,She has the ability...
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="app.closeConfirmModal()">取消</button>
                 <button class="btn btn-primary" id="confirm-btn" onclick="app.executeConfirm()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="study-calendar-modal">
+        <div class="modal-content">
+            <div class="modal-title">学习记录</div>
+            <div class="modal-body">
+                <p class="study-summary" id="study-calendar-summary"></p>
+                <div class="heatmap-scroll">
+                    <div class="heatmap-layout" aria-label="最近一年的学习热力图">
+                        <div class="heatmap-weekdays" aria-hidden="true">
+                            <span></span><span></span><span>一</span><span></span><span>三</span><span></span><span>五</span><span></span>
+                        </div>
+                        <div>
+                            <div class="heatmap-months" id="heatmap-months"></div>
+                            <div class="heatmap-grid" id="heatmap-grid"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="heatmap-legend">
+                    <span>少</span>
+                    <span class="heatmap-day"></span><span class="heatmap-day level-1"></span><span class="heatmap-day level-2"></span><span class="heatmap-day level-3"></span><span class="heatmap-day level-4"></span>
+                    <span>多</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="app.closeStudyCalendar()">关闭</button>
             </div>
         </div>
     </div>
@@ -1240,6 +1356,82 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 return `${year}-${month}-${day}`;
             }
 
+            getStudyActivity() {
+                try {
+                    const data = JSON.parse(localStorage.getItem('studyActivity') || '{}');
+                    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+                } catch (error) {
+                    return {};
+                }
+            }
+
+            recordStudyActivity() {
+                const activity = this.getStudyActivity();
+                const todayKey = this.getTodayKey();
+                activity[todayKey] = (Number(activity[todayKey]) || 0) + 1;
+                localStorage.setItem('studyActivity', JSON.stringify(activity));
+            }
+
+            getStudyActivityLevel(count, maxCount) {
+                if (!count) return 0;
+                if (maxCount <= 1) return 1;
+                return Math.min(4, Math.max(1, Math.ceil((count / maxCount) * 4)));
+            }
+
+            showStudyCalendar() {
+                this.renderStudyCalendar();
+                document.getElementById('study-calendar-modal').classList.add('active');
+            }
+
+            closeStudyCalendar() {
+                document.getElementById('study-calendar-modal').classList.remove('active');
+            }
+
+            renderStudyCalendar() {
+                const activity = this.getStudyActivity();
+                const counts = Object.values(activity).map(value => Number(value) || 0);
+                const maxCount = Math.max(...counts, 0);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const start = new Date(today);
+                const weekday = start.getDay();
+                start.setDate(start.getDate() - (weekday === 0 ? 6 : weekday - 1) - 52 * 7);
+
+                const formatDate = date => {
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                };
+
+                const dates = Array.from({ length: 53 * 7 }, (_, index) => {
+                    const date = new Date(start);
+                    date.setDate(start.getDate() + index);
+                    return date;
+                });
+                const activeDays = counts.filter(count => count > 0).length;
+                let streak = 0;
+                const streakDate = new Date(today);
+                while ((Number(activity[formatDate(streakDate)]) || 0) > 0) {
+                    streak++;
+                    streakDate.setDate(streakDate.getDate() - 1);
+                }
+
+                document.getElementById('study-calendar-summary').textContent = `累计学习 ${activeDays} 天 · 当前连续学习 ${streak} 天`;
+                document.getElementById('heatmap-months').innerHTML = dates
+                    .filter(date => date.getDate() === 1)
+                    .map(date => `<span class="heatmap-month" style="grid-column:${Math.floor((date - start) / 86400000 / 7) + 1}">${date.getMonth() + 1}月</span>`)
+                    .join('');
+                document.getElementById('heatmap-grid').innerHTML = dates.map(date => {
+                    const key = formatDate(date);
+                    const count = Number(activity[key]) || 0;
+                    const future = date > today;
+                    const level = this.getStudyActivityLevel(count, maxCount);
+                    const title = future ? `${key}（未来日期）` : `${key}：学习 ${count} 个单词`;
+                    return `<span class="heatmap-day level-${level}${future ? ' is-future' : ''}" title="${title}" aria-label="${title}"></span>`;
+                }).join('');
+            }
+
             // 更新UI
             updateUI() {
                 this.updateHomeStats();
@@ -1466,6 +1658,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                     if (this.studyMode === 'review2') {
                         this.removeFromReviewLayer2(this.getActiveWord());
                     }
+                    this.recordStudyActivity();
                     this.reviewPosition++;
                     this.saveCurrentReviewProgress();
                     this.loadCard();
@@ -1476,7 +1669,10 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 this.knownIndices.add(this.currentIndex);
                 this.currentIndex++;
                 this.saveCardProgress();
-                if (!wasAlreadyStudied) this.recordDailyNewStudy();
+                if (!wasAlreadyStudied) {
+                    this.recordDailyNewStudy();
+                    this.recordStudyActivity();
+                }
                 this.loadCard();
             }
 
@@ -1486,6 +1682,7 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                     if (this.studyMode === 'review1' || this.studyMode === 'review2') {
                         this.addToReviewLayer2(this.getActiveWord());
                     }
+                    this.recordStudyActivity();
                     this.reviewPosition++;
                     this.saveCurrentReviewProgress();
                     this.loadCard();
@@ -1497,7 +1694,10 @@ ability,əˈbɪləti,n. 能力,She has the ability...
                 this.addToUnrecognized(this.currentIndex);
                 this.currentIndex++;
                 this.saveCardProgress();
-                if (!wasAlreadyStudied) this.recordDailyNewStudy();
+                if (!wasAlreadyStudied) {
+                    this.recordDailyNewStudy();
+                    this.recordStudyActivity();
+                }
                 this.loadCard();
             }
 
