@@ -5,6 +5,7 @@ import { gradientShift, pulse } from './components/animations'
 import { WordCard } from './components/WordCard'
 import { SettingsModal } from './components/SettingsModal'
 import { UnknownWordsModal } from './components/UnknownWordsModal'
+import { StudyCalendarModal, type StudyRecords } from './components/StudyCalendarModal'
 import { supabase } from './utils/supabase'
 
 interface Translation {
@@ -343,6 +344,7 @@ const ButtonContainer = styled.div`
 
 const BACKGROUND_STORAGE_KEY = 'selectedBackground'
 const CONTENT_VISIBILITY_STORAGE_KEY = 'wordCardContentVisible'
+const STUDY_RECORDS_STORAGE_KEY = 'studyRecords'
 
 const backgrounds = [
   'linear-gradient(-45deg, #f5f5dc, #ede0c8, #f5f5dc)',
@@ -355,6 +357,24 @@ const backgrounds = [
 const themeColors = ['#f5f5dc', '#f39c12', '#1abc9c', '#2196f3', '#1a1a2e']
 
 const libraryKeys = ['chuzhong', 'gaozhong', 'cet4', 'cet6', 'kaoyan', 'toefl', 'sat']
+
+const getTodayKey = () => {
+  const date = new Date()
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const getStoredStudyRecords = (): StudyRecords => {
+  try {
+    const stored = localStorage.getItem(STUDY_RECORDS_STORAGE_KEY)
+    const records = stored ? JSON.parse(stored) : {}
+    return records && typeof records === 'object' && !Array.isArray(records) ? records : {}
+  } catch {
+    return {}
+  }
+}
 
 const getRequestedLocation = () => {
   const params = new URLSearchParams(window.location.search)
@@ -427,6 +447,7 @@ function App() {
   const [bgIndex, setBgIndex] = useState(getStoredBackgroundIndex)
   const [showSettings, setShowSettings] = useState(false)
   const [showUnknown, setShowUnknown] = useState(false)
+  const [showStudyCalendar, setShowStudyCalendar] = useState(false)
   const [showCardContent, setShowCardContent] = useState(getStoredContentVisible)
   const [selectedLibrary, setSelectedLibrary] = useState(getStoredLibrary)
   const [currentIndex, setCurrentIndex] = useState(
@@ -445,6 +466,7 @@ function App() {
     return data ? JSON.parse(data) : []
   })
   const [isLoading, setIsLoading] = useState(false)
+  const [studyRecords, setStudyRecords] = useState<StudyRecords>(getStoredStudyRecords)
   const wordRequestLockedRef = useRef(false)
   const wordRequestIdRef = useRef(0)
 
@@ -543,6 +565,12 @@ function App() {
         setTranslations(data.translations)
         setPhrases(data.phrases)
         setSentences(data.sentences)
+        const today = getTodayKey()
+        setStudyRecords(current => {
+          const next = { ...current, [today]: (current[today] || 0) + 1 }
+          localStorage.setItem(STUDY_RECORDS_STORAGE_KEY, JSON.stringify(next))
+          return next
+        })
       } finally {
         if (wordRequestIdRef.current === requestId) {
           setIsLoading(false)
@@ -864,6 +892,13 @@ function App() {
           >
             不会的单词
           </UnknownWordsButton>
+          <FixedSettingsButton
+            textColor={bgIndex === 0 ? '#000' : '#fff'}
+            onClick={() => setShowStudyCalendar(true)}
+            style={{ top: '220px' }}
+          >
+            学习记录
+          </FixedSettingsButton>
         </ButtonContainer>
         <SettingsModal
           show={showSettings}
@@ -877,6 +912,11 @@ function App() {
           onClose={() => setShowUnknown(false)}
           unknownWords={unknownWords}
           onRemove={handleRemoveUnknown}
+        />
+        <StudyCalendarModal
+          show={showStudyCalendar}
+          onClose={() => setShowStudyCalendar(false)}
+          records={studyRecords}
         />
       </Container>
     </>
